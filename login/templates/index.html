@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>B站扫码登录</title>
+    <style>
+        body {
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            margin: 0;
+            background-color: #f0f2f5;
+            font-family: sans-serif;
+        }
+        .container {
+            background-color: #fff;
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+            text-align: center;
+            max-width: 400px;
+            width: 90%;
+        }
+        h2 {
+            color: #333;
+            margin-bottom: 20px;
+        }
+        #qrcode-container {
+            min-height: 250px; /* Ensure space even when image is not loaded */
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+        #qrcode-img {
+            width: 250px;
+            height: 250px;
+            border: 1px solid #eee;
+            border-radius: 4px;
+            object-fit: contain;
+            display: none; /* Hidden by default until QR code is loaded */
+        }
+        #loading-spinner {
+            border: 4px solid rgba(0, 0, 0, 0.1);
+            border-left: 4px solid #00a1d6;
+            border-radius: 50%;
+            width: 30px;
+            height: 30px;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        #status-message {
+            margin-top: 20px;
+            font-size: 1.1em;
+            color: #555;
+            min-height: 2em; /* Prevent layout shift */
+        }
+        .loading {
+            color: orange;
+        }
+        .scanned {
+            color: green;
+        }
+        .error {
+            color: red;
+        }
+        button {
+            padding: 10px 20px;
+            font-size: 1em;
+            background-color: #00a1d6;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            transition: background-color 0.3s ease;
+            margin-top: 20px;
+        }
+        button:hover {
+            background-color: #008ccb;
+        }
+        button:disabled {
+            background-color: #ccc;
+            cursor: not-allowed;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h2>B站扫码登录</h2>
+        <div id="qrcode-container">
+            <div id="loading-spinner"></div>
+            <img id="qrcode-img" src="" alt="二维码加载中...">
+        </div>
+        <p id="status-message">点击下方按钮开始登录</p>
+        <button id="startButton" onclick="startLogin()">开始扫码登录</button>
+        <button id="resetButton" style="display: none;" onclick="resetLogin()">重新生成二维码</button>
+    </div>
+
+    <script>
+        const imgElement = document.getElementById('qrcode-img');
+        const statusMessageElement = document.getElementById('status-message');
+        const startButton = document.getElementById('startButton');
+        const resetButton = document.getElementById('resetButton');
+        const loadingSpinner = document.getElementById('loading-spinner');
+        let qrcodeKey = null;
+        let checkInterval = null;
+
+        function setStatus(message, type = '') {
+            statusMessageElement.textContent = message;
+            statusMessageElement.className = 'status-message'; // Reset classes
+            if (type) {
+                statusMessageElement.classList.add(type);
+            }
+        }
+
+        function showQRCode(show = true) {
+            imgElement.style.display = show ? 'block' : 'none';
+            loadingSpinner.style.display = show ? 'none' : 'block';
+        }
+
+        async function fetchQRCodeAndStartPolling() {
+            setStatus("正在生成二维码...", 'loading');
+            startButton.disabled = true;
+            resetButton.style.display = 'none';
+            showQRCode(false);
+
+            try {
+                const response = await fetch('/generate_qrcode');
+                const data = await response.json();
+
+                if (data.qrcode_key) {
+                    qrcodeKey = data.qrcode_key;
+                    imgElement.src = `/qrcode_image?qrcode_key=${qrcodeKey}&_t=${Date.now()}`; // Add cache buster
+                    imgElement.onload = () => {
+                        showQRCode(true);
+                        setStatus("请使用B站APP扫码", '');
+                    };
+                    imgElement.onerror = () => {
+                        setStatus("二维码图片加载失败，请刷新页面或重试", 'error');
+                        showQRCode(false);
+                        startButton.disabled = false;
+                        resetButton.style.display = 'block';
+                        clearInterval(checkInterval);
+                    };
+                    
+                    // Clear any existing interval
+                    if (checkInterval) {
+                        clearInterval(checkInterval);
+                    }
+                    checkInterval = setInterval(checkScanStatus, 3000); // Start polling every 3 seconds
+
+                } else {
+                    setStatus(`生成二维码失败: ${data.message || '未知错误'}`, 'error');
+                    startButton.disabled = false;
+                }
+            } catch (error) {
+                console.error("Error initiating login:", error);
+                setStatus("启动登录失败，请检查网络或后端服务。", 'error');
+                startButton.disabled = false;
+            }
+        }
+
+        async function checkScanStatus() {
+            if (!qrcodeKey) {
+                setStatus("会话已失效，请重新生成二维码", 'error');
+                clearInterval(checkInterval);
+                startButton.disabled = false;
+                resetButton.style.display = 'block';
+                showQRCode(false);
+                return;
+            }
+
+            try {
+                const response = await fetch(`/check_scan?qrcode_key=${qrcodeKey}`);
+                const data = await response.json();
+                console.log("Scan status:", data);
+
+                if (data.code === 0) { // 成功
+                    setStatus("登录成功！", 'scanned');
+                    clearInterval(checkInterval);
+                    startButton.style.display = 'none';
+                    resetButton.style.display = 'block'; // Allow user to login again
+                    // 通知命令行，通过AJAX发送最终的url_with_token
+                    if (data.data && data.data.url) { // data.url 是B站返回的url_with_token
+                        fetch('/finish_login', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ url_with_token: data.data.url })
+                        })
+                        .then(res => res.json())
+                        .then(resData => {
+                            if (resData.success) {
+                                console.log("Cookies sent to backend:", resData.cookies);
+                                setStatus("登录成功！Cookie已获取。", 'scanned');
+                            } else {
+                                console.error("Failed to send url_with_token to backend for cookie extraction.");
+                                setStatus("登录成功，但获取Cookie失败。", 'error');
+                            }
+                        })
+                        .catch(err => {
+                            console.error("Error sending url_with_token to backend:", err);
+                            setStatus("登录成功，但后端通信异常。", 'error');
+                        });
+                    }
+                } else if (data.code === -3) { // 已扫码未确认
+                    setStatus("已扫码，请在手机上确认登录", 'loading');
+                } else if (data.code === -2) { // 未扫码
+                    setStatus("请使用B站APP扫码", '');
+                } else if (data.code === -1) { // Key失效或二维码过期
+                    setStatus("二维码已过期，请点击按钮重新生成", 'error');
+                    clearInterval(checkInterval);
+                    startButton.disabled = false;
+                    resetButton.style.display = 'block';
+                    showQRCode(false);
+                    qrcodeKey = null; // Invalidate current qrcodeKey
+                } else { // 其他错误
+                    setStatus(`登录状态异常: ${data.message || '未知错误'} (Code: ${data.code})`, 'error');
+                    clearInterval(checkInterval);
+                    startButton.disabled = false;
+                    resetButton.style.display = 'block';
+                    showQRCode(false);
+                    qrcodeKey = null;
+                }
+            } catch (error) {
+                console.error("Error checking scan status:", error);
+                setStatus("检查登录状态失败，请稍后再试", 'error');
+                clearInterval(checkInterval);
+                startButton.disabled = false;
+                resetButton.style.display = 'block';
+                showQRCode(false);
+                qrcodeKey = null;
+            }
+        }
+
+        function startLogin() {
+            startButton.style.display = 'none';
+            resetButton.style.display = 'none'; // Hide reset button initially
+            fetchQRCodeAndStartPolling();
+        }
+
+        function resetLogin() {
+            clearInterval(checkInterval);
+            qrcodeKey = null;
+            imgElement.src = ''; // Clear image
+            showQRCode(false); // Hide image
+            setStatus("点击开始扫码登录", '');
+            startButton.style.display = 'block';
+            resetButton.style.display = 'none';
+            startButton.disabled = false; // Enable start button
+        }
+        
+        // Initial state
+        resetLogin(); // Call resetLogin to set initial UI state correctly
+    </script>
+</body>
+</html>

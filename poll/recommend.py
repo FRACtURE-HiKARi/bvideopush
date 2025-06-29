@@ -3,43 +3,11 @@ import asyncio
 import json
 import os
 from datetime import datetime
+from utils import *
 
 # --- 配置常量 ---
-COOKIES_FILE_PATH = "cookies/bilibili_cookies.json"
 RECOMMEND_API_URL = "https://api.bilibili.com/x/web-interface/index/top/feed/rcmd" # B站推荐列表API
 OUTPUT_DIR = "api_responses" # 保存API响应的目录
-
-# 默认请求头，模拟浏览器
-DEFAULT_HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-    "Referer": "https://www.bilibili.com/",
-    "Origin": "https://www.bilibili.com/",
-    "Accept": "application/json, text/plain, */*",
-    "Accept-Encoding": "gzip, deflate, br",
-    "Accept-Language": "zh-CN,zh;q=0.9",
-    "Connection": "keep-alive"
-}
-
-# --- 辅助函数 ---
-
-def load_cookies(file_path):
-    """
-    从JSON文件加载Cookie。
-    """
-    if not os.path.exists(file_path):
-        print(f"[{datetime.now()}] Cookie文件未找到: {file_path}")
-        return None
-    try:
-        with open(file_path, 'r', encoding='utf-8') as f:
-            cookies = json.load(f)
-        print(f"[{datetime.now()}] 成功加载Cookie: {file_path}")
-        return cookies
-    except json.JSONDecodeError as e:
-        print(f"[{datetime.now()}] Cookie文件解析失败 (JSON格式错误): {e}")
-        return None
-    except Exception as e:
-        print(f"[{datetime.now()}] 加载Cookie文件时发生错误: {e}")
-        return None
 
 async def fetch_bilibili_recommendations(cookies):
     """
@@ -64,9 +32,6 @@ async def fetch_bilibili_recommendations(cookies):
     # for k, v in cookies.items():
     #     client_session.cookie_jar.update_cookies({k: v}, response_url=RECOMMEND_API_URL)
     # request_headers = DEFAULT_HEADERS.copy() # 此时headers不再需要手动加Cookie
-
-    print(f"[{datetime.now()}] 正在请求B站推荐列表API: {RECOMMEND_API_URL}")
-    print(f"[{datetime.now()}] 使用的Cookie键: {list(cookies.keys())}")
 
     async with aiohttp.ClientSession() as session:
         try:
@@ -138,6 +103,14 @@ async def main():
     print("B站API客户端操作完成。")
     print("-------------------------------------------------------")
 
+# returns array of objects.
+async def fetch_items():
+    cookies = load_cookies(COOKIES_FILE_PATH)
+    data = await fetch_bilibili_recommendations(cookies)
+    if not data or not 'data' in data.keys() or not 'item' in data['data'].keys():
+        return None
+    return data['data']['item']
+    
 # --- 程序入口 ---
 if __name__ == "__main__":
     asyncio.run(main())
